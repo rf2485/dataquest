@@ -1,0 +1,107 @@
+---
+title: "Forest Fires"
+author: "RF"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+Practicing ggplot with a forest fires dataset. [Source](http://www3.dsi.uminho.pt/pcortez/fires.pdf)
+```{r}
+library(tidyverse)
+fires <- read_csv("forestfires.csv")
+```
+Column descriptions:
+**X**: X-axis spatial coordinate within the Montesinho park map: 1 to 9
+**Y**: Y-axis spatial coordinate within the Montesinho park map: 2 to 9
+**month**: Month of the year: 'jan' to 'dec'
+**day**: Day of the week: 'mon' to 'sun'
+**FFMC**: Fine Fuel Moisture Code index from the [fire weather index FWI](https://en.wikipedia.org/wiki/Forest_fire_weather_index) system: 18.7 to 96.20
+**DMC**: Duff Moisture Code index from the FWI system: 1.1 to 291.3
+**DC**: Drought Code index from the FWI system: 7.9 to 860.6
+**ISI**: Initial Spread Index from the FWI system: 0.0 to 56.10
+**temp**: Temperature in Celsius degrees: 2.2 to 33.30
+**RH**: Relative humidity in percentage: 15.0 to 100
+**wind**: Wind speed in km/h: 0.40 to 9.40
+**rain**: Outside rain in mm/m2 : 0.0 to 6.4
+**area**: The burned area of the forest (in ha): 0.00 to 1090.84
+```{r}
+spec(fires)
+```
+```{r}
+unique(fires$month)
+```
+```{r}
+unique(fires$day)
+```
+
+Convert month and day to categorical variables with the correct orders.
+```{r}
+month_order <- c('jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec')
+day_order <- c('mon','tue','wed','thu','fri','sat','sun')
+fires <- fires %>%
+  mutate(
+    month = factor(month, levels = month_order),
+    day = factor(day, levels = day_order)
+  )
+```
+Count number of forest fires by month.
+```{r}
+fires_month <- fires %>%
+  group_by(month) %>%
+  summarise(month_count =n())
+fires_month
+```
+Count number of forest fires by day of the week.
+```{r}
+fires_day <- fires %>%
+  group_by(day) %>%
+  summarise(day_count = n())
+fires_day
+```
+Visualize the fires_month tibble.
+```{r}
+fires_month %>%
+  ggplot(aes(x=month, y=month_count)) +
+  geom_col() +
+  labs(
+    title = "Number of Fires Each Month",
+    y = "count"
+  )
+```
+Visualize the fires_day tibble.
+```{r}
+fires_day %>%
+  ggplot(aes(x=day, y=day_count)) +
+  geom_col() +
+  labs(
+    title = "Number of Fires Each Day of the Week",
+    y = "count"
+  )
+```
+August and September have the most fires, as well as weekends.
+Let's look at the relationship between the other columns and month.
+```{r}
+fires_long <- fires %>%
+  pivot_longer(
+    cols = c(FFMC, DMC, DC, ISI, temp, RH, wind, rain),
+    names_to = "data_col",
+    values_to = "value"
+  )
+fires_long %>%
+  ggplot(aes(x=month, y=value)) +
+  geom_col() +
+  facet_wrap(vars(data_col), scales = "free_y")
+```
+All of the variables have increased values in August, and all but rain have increased values in September.
+
+Let's look at the relationship these variables have to the area burned by a fire.
+```{r}
+fires_long %>%
+  filter(area < 300 & area > 0) %>%
+  ggplot(aes(x=value, y=area)) +
+  geom_point() +
+  facet_wrap(vars(data_col), scales = "free_x") +
+  labs(
+    y="area"
+  )
+```

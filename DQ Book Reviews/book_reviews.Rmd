@@ -1,0 +1,75 @@
+---
+title: "Book Reviews"
+author: "RF"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+### Explore the dataset
+```{r}
+library(tidyverse)
+reviews <- read_csv("book_reviews.csv", show_col_types = FALSE)
+dim(reviews)
+colnames(reviews)
+```
+```{r}
+for (c in colnames(reviews)) {
+  print("Column name:")
+  print(c)
+  print("Column type:")
+  print(typeof(reviews[[c]]))
+  print("Unique values:")
+  print(unique(reviews[[c]]))
+}
+```
+### Clean the dataset
+Count number of NAs
+```{r}
+for (c in colnames(reviews)) {
+  num_NA <- sum(is.na(reviews[[c]]))
+  print(c)
+  print(num_NA)
+}
+```
+Remove rows with missing data.
+```{r}
+clean_reviews <- reviews %>%
+  filter(!is.na(review))
+dim(clean_reviews)
+```
+This is probably an acceptable amount of data loss.
+Now we have to make the state names consistent.
+```{r}
+clean_reviews <- clean_reviews %>%
+  mutate(
+    state = case_when(
+      state == "Texas" ~ "TX",
+      state == "California" ~ "CA",
+      state == "Florida" ~ "FL",
+      state == "New York" ~ "NY",
+      TRUE ~ state
+    ))
+print(unique(clean_reviews$state))
+```
+Convert reviews to numerical form.
+```{r}
+clean_reviews <- clean_reviews %>%
+  mutate(
+    review_num = case_when(
+      review == "Poor" ~ 1,
+      review == "Fair" ~ 2,
+      review == "Good" ~ 3,
+      review == "Great" ~ 4,
+      review == "Excellent" ~ 5
+    ),
+    is_high_review = review_num >= 4
+  )
+```
+### Data analysis
+We will define the most profitable books as books that are the most expensive, and have a high review.
+```{r}
+profitable <- clean_reviews %>%
+  filter(price == max(unique(clean_reviews$price)) &
+           is_high_review)
+unique(profitable$book)
+```

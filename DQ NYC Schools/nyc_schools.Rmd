@@ -1,0 +1,137 @@
+---
+title: "NYC Schools"
+author: "RF"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+Import the `tidyverse` library.
+```{r}
+library(tidyverse)
+```
+Import the `"combined.csv"` dataset created as part of the data cleaning Dataquest course, downloaded from [here](https://data.world/dataquest/nyc-schools-data/workspace/file?filename=combined.csv). This provides demographic, SAT testing, and AP testing data.
+```{r}
+combined <- read_csv("combined.csv")
+```
+Import the survey data `.txt` files, downloaded from [NYC Open Data](https://data.cityofnewyork.us/Education/2011-NYC-School-Survey/mnz3-dyi8).
+```{r}
+gened <- read_tsv("2011 data files online/masterfile11_gened_final.txt")
+d75 <- read_tsv("2011 data files online/masterfile11_d75_final.txt")
+```
+The survey data sets provide more granular data than we need. We are interested in aggregate scores. From the data dictionary, survey questions assessed the following metrics:
+* Safety and Respect
+* Communication
+* Engagement
+* Academic Expectations
+
+The following groups responded to the survey:
+* Parents
+* Teachers
+* Students
+* Total (average of parent, teacher, and student scores)
+
+Select columns from the survey data sets necessary for analysis: `dbn` for use as a key and aggregate scores. Then, filter to include only high schools.
+```{r}
+gened_agg <- gened %>%
+  select(dbn:aca_tot_11) %>%
+  select(-bn, -schoolname, -highschool) %>%
+  filter(str_detect(schooltype, "High School"))
+```
+The d75 data set does not reliably indicate whether or not the school is a high school, so we will have to include all rows for now.
+```{r}
+d75_agg <- d75 %>%
+  select(dbn:aca_tot_11) %>%
+  select(-bn, -schoolname, -highschool, -schooltype)
+```
+Combine the `gened_agg` and `d75_agg` data sets.
+```{r}
+surveys <- bind_rows(gened_agg, d75_agg)
+```
+Now we are ready to join the survey data with the `combined` dataset. We have to pick which type of join based on the questions we want to answer:
+* Do student, teacher, and parent perceptions of NYC school quality appear to be related to demographic and academic success metrics?
+* Do students, teachers, and parents have similar perceptions of NYC school quality?
+Since the first question requires both survey and demographic data, while the second question only requires survey data, it makes sense to keep all survey data and remove demographic data not associated with one of the surveyed schools.
+```{r}
+combined_dbn <- combined %>%
+  rename(dbn = DBN)
+survey_demo <- left_join(surveys, combined_dbn, by='dbn')
+```
+Now lets focus on the first question: do student, teacher, and parent perceptions of NYC school quality appear to be related to demographic and academic success metrics? We will use a correlation matrix and scatter plots to explore this question.
+```{r}
+cor_mat <- survey_demo %>%
+  select(where(is.numeric)) %>%
+  cor(use = "pairwise.complete.obs") %>%
+  as_tibble(rownames = "variable")
+```
+To answer this question lets first look at total scores. We can break it down by student, teacher, and parent perceptions later if we notice anything interesting.
+```{r}
+safety_scores <- cor_mat %>%
+  select(variable, saf_tot_11) %>%
+  filter(saf_tot_11 > 0.25 | saf_tot_11 < -0.25)
+com_scores <- cor_mat %>%
+  select(variable, com_tot_11) %>%
+  filter(com_tot_11 > 0.25 | com_tot_11 < -0.25)
+eng_scores <- cor_mat %>%
+  select(variable, eng_tot_11) %>%
+  filter(eng_tot_11 > 0.25 | eng_tot_11 < -0.25)
+aca_scores <- cor_mat %>%
+  select(variable, aca_tot_11) %>%
+  filter(aca_tot_11 > 0.25 | aca_tot_11 < -0.25)
+```
+Format the columns of interest into long format for plotting.
+```{r}
+safety_scores_long <- survey_demo %>%
+  pivot_longer(
+    cols = c(`SAT Critical Reading Avg. Score`, `SAT Math Avg. Score`, `SAT Writing Avg. Score`, avg_sat_score, high_score_percent),
+    names_to = "group_variables",
+    values_to = "var_value"
+  )
+```
+Plot the variables of interest against the scores of interest.
+```{r}
+safety_scores_long %>%
+  ggplot(aes(x = saf_tot_11, y=var_value)) +
+  geom_point() +
+  facet_wrap(vars(group_variables), scales = "free_y", ncol = 2)
+```
+```{r}
+survey_demo %>%
+  ggplot(aes(x=aca_tot_11, y=high_score_percent)) +
+  geom_point()
+```
+
+It seems perceptions of safety are actually more important for academic success than perceptions of academic expectations.
+
+Now lets focus on the second question: Do students, teachers, and parents have similar perceptions of NYC school quality?
+
+First, we reshape the dataframe so that the survey question and the scores are in two separate columns.
+```{r}
+survey_demo_long <- survey_demo %>%
+  pivot_longer(
+    cols = saf_p_11:aca_s_11,
+    names_to = "survey_question",
+    values_to = "score"
+  ) %>%
+  mutate(
+    response_type = case_when(
+      str_sub(survey_question, 4, 6) == "_p_" ~ "parent",
+      str_sub(survey_question, 4, 6) == "_t_" ~ "teacher",
+      str_sub(survey_question, 4, 6) == "_s_" ~ "student"
+    ),
+    metric = case_when(
+      str_sub(survey_question, 1, 3) == "saf" ~ "safety",
+      str_sub(survey_question, 1, 3) == "com" ~ "communication",
+      str_sub(survey_question, 1, 3) == "eng" ~ "engagement",
+      str_sub(survey_question, 1, 3) == "aca" ~ "academic"
+    )
+      )
+```
+Now, plot box plots of each of the metrics of interest. 
+```{r}
+survey_demo_long %>%
+  ggplot(aes(x = response_type, y=score)) +
+  geom_boxplot() +
+  facet_wrap(vars(metric), scales = "free_y", ncol = 2)
+```
+
+Parents tend to rate schools more highly than students and teachers.

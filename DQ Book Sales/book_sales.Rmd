@@ -1,0 +1,126 @@
+---
+title: "DQ Book Sales"
+author: "RF"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+### Data exploration
+Download the necessary libraries and dataset.
+```{r}
+library(tidyverse)
+sales <- read_csv("sales2019.csv")
+```
+How big is the dataset?
+```{r}
+dim(sales)
+```
+What are the column names and what do they represent?
+```{r}
+colnames(sales)
+```
+date: date 
+user_submitted review: review submitted by user
+title: title of book
+total_purchased: total number of copies purchased by this customer
+customer_type: business or individual
+
+What are the column types?
+```{r}
+for (c in colnames(sales)) {
+  print(c)
+  print(typeof(sales[[c]]))
+}
+```
+Do any of the columns have missing data?
+```{r}
+for (c in colnames(sales)) {
+  print(c)
+  print(sum(is.na(sales[[c]])))
+}
+```
+### Numeric data cleaning
+Remove rows with missing user_submitted_review data.
+```{r}
+clean_sales <- sales %>%
+  filter(!is.na(user_submitted_review))
+dim(clean_sales)
+```
+Calculate average number of books purchased on an order.
+```{r}
+avg_num_purchased <- mean(clean_sales$total_purchased, na.rm = TRUE)
+avg_num_purchased
+```
+Fill missing values in total_purchased with the average value calculated above.
+```{r}
+clean_sales <- clean_sales %>%
+  mutate(
+    clean_total_purchased = if_else(is.na(total_purchased), avg_num_purchased, total_purchased)
+  )
+```
+### String data cleaning
+Words or phrases that indicate a positive review: "Awesome", "OK", "Never", "a lot".
+Create a function that indicates whether or not a review contains one of these words or phrases.
+```{r}
+positive_review <- function(review) {
+  case_when(
+    str_detect(review, "Awesome") ~ TRUE,
+    str_detect(review, "OK") ~ TRUE,
+    str_detect(review, "Never") ~ TRUE,
+    str_detect(review, "a lot") ~ TRUE,
+    TRUE ~ FALSE
+  )
+}
+```
+Create a new column that indicates whether or not the review is positive.
+```{r}
+clean_sales <- clean_sales %>%
+  mutate(
+    is_positive = positive_review(user_submitted_review)
+  )
+```
+### Data Analysis
+Was the new program effective in increasing book sales? The program started on July 1, 2019.
+
+Convert date column using lubridate.
+```{r}
+clean_sales$date <- lubridate::ymd(clean_sales$date)
+```
+Group sales that happen before and after the program started.
+```{r}
+program <- lubridate::ymd("2019-07-01")
+clean_sales <- clean_sales %>%
+  mutate(
+    before_after = case_when(
+      date < program ~ "before",
+      TRUE ~ "after"
+    )
+  )
+```
+Create a summary table that compares the number of books purchased before and after the program started.
+```{r}
+clean_sales %>%
+  group_by(before_after) %>%
+  summarise(
+    books_purchsed = sum(clean_total_purchased)
+  )
+```
+The program did not increase overall sales. Let's break down the analysis by customer_type to see if there was a change there.
+```{r}
+clean_sales %>%
+  group_by(before_after, customer_type) %>%
+  summarise(
+    books_purchsed = sum(clean_total_purchased)
+  )
+```
+It looks like businesses purchased more but individuals purchased less.
+
+How did the program impact review scores? Did review scores improve?
+```{r}
+clean_sales %>%
+  group_by(before_after) %>%
+  summarise(
+    num_positive_reviews = sum(is_positive)
+  )
+```
+The program didn't seem to change the number of positive reviews.

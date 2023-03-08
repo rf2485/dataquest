@@ -1,0 +1,272 @@
+---
+title: "DQ SQL Business Questions"
+author: "RF"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Setup
+Import the `RSQLite` and `DBI` libraries. Then, create helper functions `run_query()` which returns the result of an SQL query and `show_tables()` that calls `run_query()` and returns a list of tables and views.
+
+```{r}
+library(RSQLite)
+library(DBI)
+
+run_query <- function(query, db) {
+  conn <- DBI::dbConnect(SQLite(), db)
+  result <- DBI::dbGetQuery(conn, query)
+  DBI::dbDisconnect(conn)
+  return(result)
+}
+
+show_tables <- function(db) {
+  query <- 
+  "SELECT
+    name,
+    type
+  FROM sqlite_master
+  WHERE type IN ('table','view');"
+  tables <- run_query(query, db)
+  return(tables)
+}
+
+db <- 'chinook.db'
+show_tables(db)
+```
+### Which Generas Sell the Most in the US?
+Write a query that for each genre, calculates the number of tracks sold in the US in absolute numbers and percentages.
+```{r}
+query <-
+  "WITH usa_tracks_sold AS
+   (
+    SELECT il.* FROM invoice_line il
+    INNER JOIN invoice i on il.invoice_id = i.invoice_id
+    INNER JOIN customer c on i.customer_id = c.customer_id
+    WHERE c.country = 'USA'
+   )
+SELECT
+    g.name genre,
+    count(uts.invoice_line_id) tracks_sold,
+    cast(count(uts.invoice_line_id) AS FLOAT) / (
+        SELECT COUNT(*) from usa_tracks_sold
+    ) percentage_sold
+FROM usa_tracks_sold uts
+INNER JOIN track t on t.track_id = uts.track_id
+INNER JOIN genre g on g.genre_id = t.genre_id
+GROUP BY 1
+ORDER BY 2 DESC
+LIMIT 10;
+      "
+
+result <- run_query(query, db)
+```
+
+Create a plot to show the resulting table.
+
+```{r}
+library(tidyverse)
+
+result %>%
+  ggplot(aes(x = genre, y = tracks_sold, fill = genre)) +
+  geom_col() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, 
+                                   vjust = 0.5, 
+                                   hjust = 1),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5)) +
+  ggtitle("Number of Tracks Sold")
+
+result %>%
+  ggplot(aes(x = genre, y = percentage_sold, fill = genre)) +
+  geom_col() +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, 
+                                   vjust = 0.5, 
+                                   hjust = 1),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5)) +
+  ggtitle("Percentage of Tracks Sold")
+```
+
+Rock is by far the most purchased genre in the US, by both absolute number and percentage.
+
+### Employee Performance
+
+Determine performance of sales support agents by analyzing purchases of customers belonging to each agent.
+
+First, write query to pull total dollar amount of sales assigned to each sales support agent.
+
+total dollar amount of sales assigned to each sales support agent within the company
+
+```{r}
+performance_query <- "
+WITH customer_invoice AS
+  (
+  SELECT
+    c.customer_id,
+    c.support_rep_id,
+    SUM(i.total) total_by_employee
+  FROM customer c
+  INNER JOIN invoice i ON i.customer_id = c.customer_id
+  GROUP BY c.support_rep_id
+  )
+  
+SELECT 
+  e.*,
+  ci.total_by_employee
+FROM employee e
+INNER JOIN customer_invoice ci ON ci.support_rep_id = e.employee_id
+ORDER BY ci.total_by_employee DESC
+"
+
+performance_result <- run_query(performance_query, db)
+performance_result
+```
+
+Plot the results of the query.
+```{r}
+performance_result %>%
+  ggplot(aes(x=last_name, y=total_by_employee, fill=last_name)) +
+  geom_col() +
+  ggtitle("Employee Total Sales") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, 
+                                   vjust = 0.5, 
+                                   hjust = 1),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+```
+
+All employees that made the chart are based in Calgary, Canada. Jane Peacock has the most sales but also the earliest hire date.
+
+### Sales Data by Country
+
+Write a query that collates data on purchases from different countries. For each country, include:
+* total number of customers
+* total value of sales
+* average value of sales per customer
+* average order value
+
+Where a country has only one customer, collect them into an "Other" group.
+
+The results should be sorted by the total sales from highest to lowest, with the "Other" group at the very bottom.
+```{r}
+country_query <- "
+WITH customer_sales AS
+  (
+  SELECT
+    SUM(i.total) total_per_customer,
+    i.customer_id,
+    c.country
+  FROM invoice i
+  INNER JOIN customer c ON c.customer_id = i.customer_id
+  GROUP BY i.customer_id
+  ),
+
+  country_sales AS
+    (
+    SELECT
+      CASE
+        WHEN (
+              SELECT count(*)
+              FROM customer
+              WHERE country = cs.country
+              ) = 1 THEN 'Other'
+          ELSE cs.country
+        END AS country,
+      COUNT(DISTINCT i.customer_id) customers_per_county,
+      SUM(i.total) total_per_country,
+      AVG(cs.total_per_customer) country_avg_per_customer,
+      AVG(i.total) country_avg_order_value
+    FROM invoice i
+    INNER JOIN customer_sales cs ON cs.customer_id = i.customer_id
+    GROUP BY 1
+    ORDER BY 3 DESC
+    ),
+  
+  country_sort AS
+    (
+    SELECT
+      country,
+      CASE
+        WHEN country = 'Other' THEN 1
+        ELSE 0
+      END AS sort
+    FROM country_sales
+    )
+    
+SELECT cou.* FROM country_sales cou
+LEFT JOIN country_sort sor ON sor.country = cou.country
+ORDER BY sor.sort ASC
+
+"
+
+country_result <- run_query(country_query, db)
+country_result
+```
+Brazil has only 5 customers compared to 13 in the US, but each customer spends more than in the US. This would be a good place to focus on growth.
+
+### Album Purchases
+
+We want to figure out what percentage of purchases are individual tracks vs whole albums. 
+
+First, write a query that categorizes each invoice as either an album purchase or not and generates summary statistics on number and percentage.
+```{r}
+album_query <- "
+WITH whole_invoice AS
+  (
+  SELECT 
+    i.*,
+    il.*,
+    t.*
+  FROM invoice i
+  LEFT JOIN invoice_line il ON il.invoice_id = i.invoice_id
+  LEFT JOIN track t ON t.track_id = il.track_id
+  ),
+
+is_album AS 
+  (
+  SELECT
+    CASE
+      WHEN (
+        SELECT track_id 
+        FROM track
+        WHERE album_id = wi.album_id
+        EXCEPT
+        SELECT track_id
+        FROM invoice_line
+        WHERE invoice_line_id = wi.invoice_line_id
+      ) IS NULL
+      AND (
+        SELECT track_id
+        FROM invoice_line
+        WHERE invoice_line_id = wi.invoice_line_id
+        EXCEPT
+        SELECT track_id
+        FROM track
+        WHERE album_id = wi.album_id
+      ) IS NULL
+      THEN 1
+      ELSE 0
+    END AS is_album,
+    wi.invoice_id
+  FROM whole_invoice wi
+  )
+
+SELECT
+  SUM(ia.is_album) number_albums_perchased,
+  COUNT(DISTINCT i.invoice_id) - SUM(ia.is_album) number_nonalbums_purchased,
+  (SUM(ia.is_album) / CAST(COUNT(DISTINCT i.invoice_id) AS FLOAT)) *100 percent_albums_purchased,
+  ((COUNT(DISTINCT i.invoice_id) - SUM(ia.is_album)) / CAST(COUNT(DISTINCT i.invoice_id) AS FLOAT)) * 100 percent_nonalbums_purchased
+FROM invoice i
+LEFT JOIN is_album ia ON ia.invoice_id = i.invoice_id
+"
+album_result <- run_query(album_query, db)
+album_result
+```
+Almost 16% of sales are album purchases. Therefore, it does not make sense to remove albums from the platform.
